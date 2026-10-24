@@ -1,0 +1,281 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { apiFetch, createConversation, fetchConversations, fetchMessages, login, register, sendMessage } from './api.js';
+
+export default function App() {
+  const [view, setView] = useState('loading');
+  const [authMode, setAuthMode] = useState('login');
+  const [form, setForm] = useState({ username: '', email: '', password: '', fullName: '' });
+  const [user, setUser] = useState(null);
+  const [conversations, setConversations] = useState([]);
+  const [selectedConversation, setSelectedConversation] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    hydrateSession();
+  }, []);
+
+  const selectedParticipant = useMemo(() => {
+    if (!selectedConversation || !user) return null;
+    return (selectedConversation.participants || []).find((p) => p.id !== user.id) || null;
+  }, [selectedConversation, user]);
+
+  async function hydrateSession() {
+    try {
+      const sessionUser = await apiFetch('/api/v1/me');
+      setUser(sessionUser);
+      setView('app');
+      await refreshConversations();
+    } catch {
+      setView('auth');
+    }
+  }
+
+  async function refreshConversations() {
+    try {
+      const result = await fetchConversations();
+      const items = Array.isArray(result.items) ? result.items : [];
+      setConversations(items);
+
+      if (!selectedConversation && items.length > 0) {
+        const nextSelected = items[0];
+        setSelectedConversation(nextSelected);
+        await reloadMessages(nextSelected.id);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to load conversations');
+    }
+  }
+
+  async function reloadMessages(conversationId) {
+    try {
+      const response = await fetchMessages(conversationId);
+      setMessages(Array.isArray(response.items) ? response.items : []);
+    } catch (err) {
+      setError(err.message || 'Could not load messages');
+      setMessages([]);
+    }
+  }
+
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+    setError('');
+
+    try {
+      if (authMode === 'login') {
+        await login({ username: form.username, password: form.password });
+      } else {
+        await register({
+          username: form.username,
+          email: form.email,
+          password: form.password,
+          fullName: form.fullName
+        });
+        await login({ username: form.username, password: form.password });
+      }
+
+      const sessionUser = await apiFetch('/api/v1/me');
+      setUser(sessionUser);
+      setView('app');
+      setForm({ username: '', email: '', password: '', fullName: '' });
+      await refreshConversations();
+    } catch (err) {
+      setError(err.message || 'Authentication failed');
+    }
+  }
+
+  async function handleCreateConversation() {
+    const target = window.prompt('Enter a username to start a private chat:');
+    if (!target) return;
+
+    try {
+      const created = await createConversation({ targetUsername: target });
+      const next = await fetchConversations();
+      const items = Array.isArray(next.items) ? next.items : [];
+      setConversations(items);
+      setSelectedConversation(created);
+      await reloadMessages(created.id);
+    } catch (err) {
+      setError(err.message || 'Could not create conversation');
+    }
+  }
+
+  async function handleSendMessage() {
+    if (!draft.trim() || !selectedConversation) return;
+
+    try {
+      await sendMessage(selectedConversation.id, { content: draft });
+      setDraft('');
+      await reloadMessages(selectedConversation.id);
+      const refreshed = await fetchConversations();
+      setConversations(Array.isArray(refreshed.items) ? refreshed.items : []);
+    } catch (err) {
+      setError(err.message || 'Failed to send message');
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await apiFetch('/api/v1/logout', { method: 'POST' });
+      setUser(null);
+      setConversations([]);
+      setMessages([]);
+      setSelectedConversation(null);
+      setView('auth');
+    } catch (err) {
+      setError(err.message || 'Logout failed');
+    }
+  }
+
+  if (view === 'loading') {
+    return <div className="loading-shell">Loading BondhuChat…</div>;
+  }
+
+  if (view === 'auth') {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card">
+          <div className="brand-block">
+            <div className="brand-mark">B</div>
+            <div>
+              <h1>BondhuChat</h1>
+              <small>Private messaging, securely built.</small>
+            </div>
+          </div>
+
+          <div className="segmented-control">
+            <button className={authMode === 'login' ? 'active' : ''} type="button" onClick={() => setAuthMode('login')}>Login</button>
+            <button className={authMode === 'register' ? 'active' : ''} type="button" onClick={() => setAuthMode('register')}>Register</button>
+          </div>
+
+          <form className="auth-form" onSubmit={handleAuthSubmit}>
+            {authMode === 'register' && (
+              <>
+                <label>
+                  Full name
+                  <input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
+                </label>
+                <label>
+                  Email
+                  <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+                </label>
+              </>
+            )}
+
+            <label>
+              Username
+              <input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} />
+            </label>
+
+            <label>
+              Password
+              <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            </label>
+
+            {error && <div className="error-box">{error}</div>}
+
+            <button className="primary-button" type="submit">
+              {authMode === 'login' ? 'Sign in' : 'Create account'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <div>
+            <div className="eyebrow">Private space</div>
+            <h2>BondhuChat</h2>
+          </div>
+          <button className="ghost-button" type="button" onClick={handleLogout}>Logout</button>
+        </div>
+
+        <button className="primary-button" type="button" onClick={handleCreateConversation}>New private chat</button>
+
+        <div className="conversation-list">
+          {conversations.map((conversation) => (
+            <button
+              key={conversation.id}
+              type="button"
+              className={`conversation-item ${selectedConversation?.id === conversation.id ? 'selected' : ''}`}
+              onClick={async () => {
+                setSelectedConversation(conversation);
+                await reloadMessages(conversation.id);
+              }}
+            >
+              <div className="avatar">{(conversation.display_name || 'U').slice(0, 1).toUpperCase()}</div>
+              <div className="conversation-meta">
+                <strong>{conversation.display_name || 'Private chat'}</strong>
+                <small>{conversation.last_message || 'No messages yet'}</small>
+              </div>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <main className="chat-panel">
+        {selectedConversation ? (
+          <>
+            <header className="chat-header">
+              <div>
+                <div className="eyebrow">Direct message</div>
+                <h3>{selectedConversation.display_name || 'Private chat'}</h3>
+              </div>
+              <div className="chat-actions">
+                <button type="button">Audio call</button>
+                <button type="button">Video call</button>
+              </div>
+            </header>
+
+            <div className="messages-panel">
+              {messages.length === 0 ? (
+                <div className="empty-state">No messages yet — say hello.</div>
+              ) : (
+                messages.map((message) => (
+                  <div key={message.id} className={`message-row ${message.sender_id === user.id ? 'mine' : ''}`}>
+                    <div className="message-bubble">
+                      <div className="message-content">{message.content}</div>
+                      <div className="message-meta">{message.sender_name || 'You'}</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="composer">
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Type a message"
+                aria-label="Message input"
+              />
+              <button className="primary-button" type="button" onClick={handleSendMessage}>Send</button>
+            </div>
+          </>
+        ) : (
+          <div className="empty-state large">Start a private conversation.</div>
+        )}
+      </main>
+
+      <aside className="profile-panel">
+        <div className="profile-card">
+          <div className="avatar large">{(user?.full_name || user?.username || 'B').slice(0, 1).toUpperCase()}</div>
+          <h3>{user?.full_name || user?.username}</h3>
+          <small>@{user?.username}</small>
+        </div>
+
+        <div className="info-card">
+          <strong>Presence</strong>
+          <p>{selectedParticipant ? 'Connected' : 'Ready to chat'}</p>
+        </div>
+
+        {error && <div className="error-box">{error}</div>}
+      </aside>
+    </div>
+  );
+}

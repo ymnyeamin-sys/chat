@@ -1,0 +1,68 @@
+const API_BASE = import.meta.env.VITE_API_BASE || window.location.origin;
+
+export async function apiFetch(path, options = {}) {
+  const response = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    },
+    ...options
+  });
+
+  const contentType = response.headers.get('content-type') || '';
+  const body = contentType.includes('application/json') ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    throw new Error(body?.error || body || 'Request failed');
+  }
+
+  return body;
+}
+
+export async function register(payload) {
+  return await apiFetch('/api/v1/register', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function login(payload) {
+  return await apiFetch('/api/v1/login', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function fetchConversations() {
+  return await apiFetch('/api/v1/conversations');
+}
+
+export async function createConversation(payload) {
+  return await apiFetch('/api/v1/conversations', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function fetchMessages(conversationId) {
+  return await apiFetch(`/api/v1/conversations/${conversationId}/messages`);
+}
+
+export async function sendMessage(conversationId, payload) {
+  return await apiFetch(`/api/v1/conversations/${conversationId}/messages`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function searchUsers(query) {
+  return await apiFetch(`/api/v1/users/search?q=${encodeURIComponent(query)}`);
+}
+
+export async function startCallSignal(payload) {
+  return await apiFetch('/api/v1/calls/invite', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}

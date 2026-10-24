@@ -1,0 +1,8 @@
+node_modules
+.dist
+.vite
+frontend/dist
+worker/.wrangler
+.env
+.DS_Store
+coverage

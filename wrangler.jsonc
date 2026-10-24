@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bondhuchat-worker",
+  "main": "worker/src/index.js",
+  "compatibility_date": "2025-10-24",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "./frontend/dist",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bondhuchat",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_ROOM",
+        "class_name": "ChatRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sql": "worker/migrations/001_init.sql"
+    },
+    {
+      "tag": "v2",
+      "new_sql": "worker/migrations/002_indexes.sql"
+    }
+  ]
+}

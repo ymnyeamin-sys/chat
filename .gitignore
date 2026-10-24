@@ -1,8 +1,7 @@
 node_modules
-.dist
-.vite
-frontend/dist
-worker/.wrangler
 .env
+.wrangler
+.vite
+/dist
+frontend/dist
 .DS_Store
-coverage

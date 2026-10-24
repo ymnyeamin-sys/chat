@@ -1,6 +1,10 @@
 export const AUTH_COOKIE_NAME = 'bondhuchat_session';
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 export const ALLOWED_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+export const DEFAULT_STUN_SERVERS = [
+  'stun:stun.l.google.com:19302',
+  'stun:stun1.l.google.com:19302'
+];
 
 export function getCorsHeaders(origin = '*') {
   const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : '*';

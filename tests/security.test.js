@@ -1,32 +1,40 @@
-import { describe, expect, test } from 'vitest';
-import { sanitizeText, validateLoginPayload, validateMessagePayload, validateRegisterPayload } from '../shared/validation.js';
+import { readFileSync } from 'node:fs';
 
-describe('security validation', () => {
-  test('sanitizes whitespace-heavy user input', () => {
-    expect(sanitizeText('   hello   world   ')).toBe('hello world');
+const test = await import('vitest');
+
+const { describe, expect, it } = test;
+
+const { validateRegisterPayload, validateLoginPayload, validateMessagePayload } = await import('../shared/index.js');
+
+describe('validation logic', () => {
+  it('accepts valid registration payloads', () => {
+    const result = validateRegisterPayload({
+      username: 'mim',
+      email: 'mim@example.com',
+      password: 'strongpass123'
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.value.username).toBe('mim');
   });
 
-  test('accepts valid registration data', () => {
-    expect(validateRegisterPayload({
-      username: 'alice',
-      email: 'alice@example.com',
-      password: 'supersecret123'
-    }).ok).toBe(true);
-  });
-
-  test('rejects invalid registration data', () => {
-    expect(validateRegisterPayload({
+  it('rejects bad usernames', () => {
+    const result = validateRegisterPayload({
       username: 'ab',
-      email: 'bad-email',
-      password: 'short'
-    }).ok).toBe(false);
+      email: 'test@example.com',
+      password: 'strongpass123'
+    });
+
+    expect(result.ok).toBe(false);
   });
 
-  test('accepts valid login data', () => {
-    expect(validateLoginPayload({ username: 'alice', password: 'supersecret123' }).ok).toBe(true);
+  it('rejects empty login payloads', () => {
+    const result = validateLoginPayload({ username: '', password: '' });
+    expect(result.ok).toBe(false);
   });
 
-  test('rejects missing message content', () => {
-    expect(validateMessagePayload({ content: '' }).ok).toBe(false);
+  it('rejects empty messages', () => {
+    const result = validateMessagePayload({ content: '   ' });
+    expect(result.ok).toBe(false);
   });
 });

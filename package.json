@@ -10,6 +10,8 @@
     "dev:frontend": "npm run dev --workspace frontend",
     "dev:worker": "npm run dev --workspace worker",
     "build": "npm run build --workspace frontend",
-    "test": "npm run test --workspace worker -- --run"
-  }
+    "test": "npm run test --workspace worker -- --run",
+    "lint": "npm run lint --workspace frontend"
+  },
+  "packageManager": "npm@10.8.2"
 }

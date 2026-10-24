@@ -1,0 +1,97 @@
+import { randomId } from './db.js';
+
+export function parseCookieString(header) {
+  const cookie = header || '';
+  const match = cookie.split(';').find((item) => item.trim().startsWith('bondhuchat_session='));
+  if (!match) return null;
+  return decodeURIComponent(match.split('=')[1].trim());
+}
+
+export function getSessionToken(request) {
+  const cookie = request.headers.get('Cookie') || '';
+  const token = parseCookieString(cookie);
+  if (token) return token;
+  const url = new URL(request.url);
+  return url.searchParams.get('token');
+}
+
+export async function hashPassword(password) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({
+    name: 'PBKDF2',
+    salt,
+    iterations: 120000,
+    hash: 'SHA-256'
+  }, keyMaterial, 256);
+
+  const hashBytes = new Uint8Array(bits);
+  const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, '0')).join('');
+  const hashHex = Array.from(hashBytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `${saltHex}:${hashHex}`;
+}
+
+export async function verifyPassword(password, storedHash) {
+  if (!storedHash || typeof storedHash !== 'string') return false;
+  const [saltHex, expectedHex] = storedHash.split(':');
+  if (!saltHex || !expectedHex) return false;
+
+  const salt = Uint8Array.from(saltHex.match(/.{1,2}/g).map((b) => Number.parseInt(b, 16)));
+  const encoder = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({
+    name: 'PBKDF2',
+    salt,
+    iterations: 120000,
+    hash: 'SHA-256'
+  }, keyMaterial, 256);
+
+  const actualHex = Array.from(new Uint8Array(bits)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return actualHex === expectedHex;
+}
+
+export function createSessionToken() {
+  return randomId('sess');
+}
+
+export async function requireAuth(request, env) {
+  const db = env.DB;
+  const token = getSessionToken(request);
+  if (!token) {
+    return { ok: false, status: 401, error: 'Authentication required' };
+  }
+
+  const sessionRow = await db.prepare(
+    'SELECT s.id, s.session_token, s.user_id, s.expires_at, u.id AS user_id, u.username, u.email, u.avatar_url, u.full_name, u.bio, u.created_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.session_token = ?'
+  ).bind(token).first();
+
+  if (!sessionRow) {
+    return { ok: false, status: 401, error: 'Invalid session' };
+  }
+
+  if (Date.now() > new Date(sessionRow.expires_at).getTime()) {
+    await db.prepare('DELETE FROM sessions WHERE session_token = ?').bind(token).run();
+    return { ok: false, status: 401, error: 'Session expired' };
+  }
+
+  await db.prepare('UPDATE users SET last_seen = ? WHERE id = ?').bind(new Date().toISOString(), sessionRow.user_id).run();
+
+  return {
+    ok: true,
+    user: {
+      id: sessionRow.user_id,
+      username: sessionRow.username,
+      email: sessionRow.email,
+      full_name: sessionRow.full_name,
+      avatar_url: sessionRow.avatar_url,
+      bio: sessionRow.bio,
+      created_at: sessionRow.created_at
+    },
+    session: {
+      id: sessionRow.id,
+      token: sessionRow.session_token,
+      expires_at: sessionRow.expires_at
+    }
+  };
+}

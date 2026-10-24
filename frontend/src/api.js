@@ -1,57 +1,26 @@
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8787';
-
 export async function apiFetch(path, options = {}) {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8787';
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: options.method || 'GET',
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {})
     },
-    ...options
+    body: options.body ? JSON.stringify(options.body) : undefined
   });
 
-  const contentType = response.headers.get('content-type') || '';
-  const payload = contentType.includes('application/json') ? await response.json() : await response.text();
-
-  if (!response.ok) {
-    throw new Error(payload?.error || payload || 'Request failed');
+  const text = await response.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { raw: text };
   }
 
-  return payload;
-}
+  if (!response.ok) {
+    throw new Error(data?.error || 'Request failed');
+  }
 
-export async function register(payload) {
-  return apiFetch('/api/v1/register', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-}
-
-export async function login(payload) {
-  return apiFetch('/api/v1/login', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-}
-
-export async function fetchConversations() {
-  return apiFetch('/api/v1/conversations');
-}
-
-export async function createConversation(payload) {
-  return apiFetch('/api/v1/conversations', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-}
-
-export async function fetchMessages(conversationId) {
-  return apiFetch(`/api/v1/conversations/${conversationId}/messages`);
-}
-
-export async function sendMessage(conversationId, payload) {
-  return apiFetch(`/api/v1/conversations/${conversationId}/messages`, {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
+  return data;
 }

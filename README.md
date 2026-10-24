@@ -1,6 +1,6 @@
 # BondhuChat
 
-BondhuChat is a Cloudflare-first monorepo for a private chat app with secure authentication, persistent messaging, and real one-to-one WebRTC calling.
+BondhuChat is a Cloudflare-first monorepo for a private chat app with secure authentication, persistent messaging, and one-to-one WebRTC calling.
 
 ## Architecture choice
 
@@ -8,10 +8,10 @@ This project uses:
 - Cloudflare Pages for the React frontend
 - Cloudflare Worker for the API and secure WebSocket signaling
 - D1 for relational data
-- Durable Objects for per-conversation WebSocket coordination
-- Optional R2 attachments when enabled
+- Durable Objects for per-conversation coordination
+- Optional R2 for attachments when enabled
 
-This avoids mixed deployment patterns and keeps the app compatible with Cloudflare's free-tier stack.
+This keeps the project aligned with Cloudflare's free-tier stack and avoids mixing incompatible deployment patterns.
 
 ## Project tree
 
@@ -51,48 +51,43 @@ This avoids mixed deployment patterns and keeps the app compatible with Cloudfla
 ## Phase checklist
 
 - [x] Phase 1: scaffold, configuration, and responsive UI
-- [x] Phase 2: D1 schema and secure authentication
-- [x] Phase 3: conversations, persistent messaging, and WebSocket delivery
-- [x] Phase 4: unread counts, receipts, typing indicators, presence, and privacy
-- [x] Phase 5: real one-to-one WebRTC audio/video calling
-- [ ] Phase 6: attachments and notifications (requires R2/browser push support)
-- [ ] Phase 7: full automated testing and production hardening
-- [ ] Phase 8: optional group calling with an SFU architecture
+- [ ] Phase 2: D1 schema and secure authentication
+- [ ] Phase 3: conversations, persistent messaging, and WebSocket delivery
+- [ ] Phase 4: unread counts, receipts, typing indicators, presence, and privacy
+- [ ] Phase 5: real one-to-one WebRTC audio/video calling
+- [ ] Phase 6: attachments and notifications (requires R2/browser-push support)
+- [ ] Phase 7: tests, security review, deployment, and documentation
+- [ ] Phase 8: optional group calling with a future SFU architecture
 
 ## Quickstart
 
-1. Install dependencies:
+1. Install dependencies
    ```bash
    npm install
    ```
-2. Copy environment file:
+
+2. Copy the local environment file
    ```bash
    cp .env.example .env
    ```
-3. Start the worker in development mode:
+
+3. Run the worker locally
    ```bash
    npm run dev:worker
    ```
-4. Start the frontend:
+
+4. Run the frontend locally
    ```bash
    npm run dev:frontend
    ```
-5. Access the app at http://localhost:5173 and the API at http://localhost:8787.
 
-## Deployment
+5. Open the app in your browser
+   - Frontend: http://localhost:5173
+   - API: http://localhost:8787
 
-See sections below for Cloudflare deployment instructions.
+## Cloudflare setup
 
-## Security and limits
-
-- Passwords are stored as PBKDF2 hashes and never in plaintext.
-- Session cookies are HttpOnly and SameSite=Lax; Secure is enabled in production.
-- WebSocket sessions are authenticated using secure session cookies and authorization checks.
-- Direct peer-to-peer WebRTC will work only when both peers can reach a public STUN service. A TURN server may be required on restrictive networks.
-- Browser push notifications require explicit permission and extra infrastructure. The app supports in-app notifications immediately, and browser notifications only after user opt-in.
-- Group calling is intentionally left as a not-implemented phase because Cloudflare Workers are not a full SFU.
-
-## D1 setup
+Create the D1 database, then apply migrations:
 
 ```bash
 npx wrangler d1 create bondhuchat
@@ -100,19 +95,26 @@ npx wrangler d1 migrations apply bondhuchat --local
 npx wrangler d1 migrations apply bondhuchat --remote
 ```
 
-Update `wrangler.jsonc` with the created database ID before deploying.
+Update the `database_id` in `wrangler.jsonc` before deployment.
 
-## Production deployment summary
+## Deployment summary
 
 ```bash
 npx wrangler login
-npx wrangler d1 create bondhuchat
 npx wrangler deploy
 npx wrangler pages project create bondhuchat --production-branch main
 ```
 
-Then point the frontend `VITE_API_BASE` to the deployed Worker URL and deploy the Pages app.
+Set `VITE_API_BASE` to your deployed Worker URL before deploying the frontend.
 
-## Notes
+## Limits and honest notes
 
-This repository is intentionally structured as a real, production-aware foundation. If you want deeper customization, the app is ready for extension with R2-backed attachments, push notifications, and a future SFU-based group-calling phase.
+- Passwords are hashed with PBKDF2 and never stored in plaintext.
+- Session cookies are HttpOnly; they are marked Secure in production HTTPS deployments.
+- One-to-one WebRTC requires a public STUN service and may need TURN in restrictive networks.
+- Browser notifications require user permission and additional infrastructure for background push delivery.
+- Group calling is intentionally deferred. Workers alone are not a full SFU.
+
+## Next steps
+
+The project begins with a working monorepo scaffold and responsive UI, then moves into secure auth, D1 schema, messaging, and WebRTC call signaling.

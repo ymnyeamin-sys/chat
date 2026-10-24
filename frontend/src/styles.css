@@ -1,118 +1,63 @@
-import { apiFetch, createConversation, login, register, fetchConversations, fetchMessages, sendMessage, searchUsers, startCallSignal } from './api.js';
+import React, { useEffect, useMemo, useState } from 'react';
+import { apiFetch, createConversation, fetchConversations, fetchMessages, login, register, sendMessage } from './api.js';
 
-const appState = {
-  user: null,
-  session: null,
-  conversations: [],
-  selectedConversationId: null,
-  messages: [],
-  users: [],
-  socket: null,
-  peerConnection: null,
-  localStream: null,
-  remoteStream: null,
-  callState: 'idle'
-};
-
-const initialMessage = {
-  id: 'welcome',
-  sender: 'system',
-  content: 'Welcome to BondhuChat. Secure, private, and real-time.'
-};
+const emptyDraft = '';
 
 export default function App() {
-  const [status, setStatus] = React.useState('loading');
-  const [authMode, setAuthMode] = React.useState('login');
-  const [form, setForm] = React.useState({
-    username: '',
-    email: '',
-    password: '',
-    fullName: ''
-  });
-  const [selectedConversation, setSelectedConversation] = React.useState(null);
-  const [draft, setDraft] = React.useState('');
-  const [typing, setTyping] = React.useState(false);
-  const [callKind, setCallKind] = React.useState('audio');
-  const [callStatus, setCallStatus] = React.useState('idle');
-  const [error, setError] = React.useState('');
+  const [view, setView] = useState('loading');
+  const [authMode, setAuthMode] = useState('login');
+  const [form, setForm] = useState({ username: '', email: '', password: '', fullName: '' });
+  const [user, setUser] = useState(null);
+  const [conversations, setConversations] = useState([]);
+  const [selectedConversation, setSelectedConversation] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [draft, setDraft] = useState(emptyDraft);
+  const [statusText, setStatusText] = useState('');
+  const [error, setError] = useState('');
 
-  React.useEffect(() => {
+  useEffect(() => {
     hydrateSession();
   }, []);
 
-  React.useEffect(() => {
-    if (selectedConversation) {
-      loadMessages(selectedConversation.id);
-      connectConversationSocket(selectedConversation.id);
-    }
-  }, [selectedConversation]);
+  const selectedParticipant = useMemo(() => {
+    if (!selectedConversation || !user) return null;
+    const other = selectedConversation.participants?.find((p) => p.id !== user.id);
+    return other || null;
+  }, [selectedConversation, user]);
 
-  const hydrateSession = async () => {
+  async function hydrateSession() {
     try {
-      const user = await apiFetch('/api/v1/me');
-      appState.user = user;
-      setStatus('authenticated');
-      loadConversations();
-    } catch (err) {
-      appState.user = null;
-      setStatus('guest');
+      const sessionUser = await apiFetch('/api/v1/me');
+      setUser(sessionUser);
+      setView('app');
+      await refreshConversations();
+    } catch {
+      setView('auth');
     }
-  };
+  }
 
-  const loadConversations = async () => {
-    try {
-      const list = await fetchConversations();
-      appState.conversations = list;
-      if (!selectedConversation && list.length) {
-        setSelectedConversation(list[0]);
-      }
-    } catch (err) {
-      console.error('Failed to load conversations', err);
+  async function refreshConversations() {
+    const result = await fetchConversations();
+    const items = Array.isArray(result.items) ? result.items : [];
+    setConversations(items);
+
+    if (!selectedConversation && items.length) {
+      setSelectedConversation(items[0]);
+      await reloadMessages(items[0].id);
     }
-  };
+  }
 
-  const loadMessages = async (conversationId) => {
+  async function reloadMessages(conversationId) {
     try {
       const response = await fetchMessages(conversationId);
-      const items = response.items || [initialMessage];
-      appState.messages = items;
+      setMessages(Array.isArray(response.items) ? response.items : []);
     } catch (err) {
-      console.error('Failed to load messages', err);
-      appState.messages = [initialMessage];
+      setError(err.message || 'Could not load messages');
+      setMessages([]);
     }
-  };
+  }
 
-  const connectConversationSocket = (conversationId) => {
-    if (appState.socket) {
-      appState.socket.close();
-      appState.socket = null;
-    }
-
-    const wsUrl = `${import.meta.env.VITE_WS_BASE || (window.location.origin.replace(/^http/, 'ws'))}/ws?conversationId=${conversationId}`;
-    const socket = new WebSocket(wsUrl);
-    appState.socket = socket;
-
-    socket.onmessage = (event) => {
-      const payload = JSON.parse(event.data);
-      if (payload.type === 'message') {
-        const newMessage = payload.message;
-        appState.messages = [...(appState.messages || []).filter((msg) => msg.id !== newMessage.id), newMessage];
-        if (selectedConversation && selectedConversation.id === newMessage.conversationId) {
-          setSelectedConversation({ ...selectedConversation, lastMessage: newMessage.content });
-        }
-      }
-
-      if (payload.type === 'typing') {
-        setTyping(payload.isTyping);
-      }
-    };
-
-    socket.onopen = () => {
-      console.info('WebSocket connected');
-    };
-  };
-
-  const handleAuthSubmit = async (event) => {
+  async function handleAuthSubmit(event) {
     event.preventDefault();
     setError('');
 
@@ -126,123 +71,83 @@ export default function App() {
           password: form.password,
           fullName: form.fullName
         });
+        await login({ username: form.username, password: form.password });
       }
 
-      const user = await apiFetch('/api/v1/me');
-      appState.user = user;
-      setStatus('authenticated');
-      await loadConversations();
+      const sessionUser = await apiFetch('/api/v1/me');
+      setUser(sessionUser);
+      setView('app');
+      setForm({ username: '', email: '', password: '', fullName: '' });
+      await refreshConversations();
     } catch (err) {
       setError(err.message || 'Authentication failed');
     }
-  };
+  }
 
-  const handleCreateConversation = async (targetUsername) => {
+  async function handleCreateConversation() {
+    const target = window.prompt('Enter the username to start a private chat:');
+    if (!target) return;
+
     try {
-      const conversation = await createConversation({ targetUsername });
-      const list = await fetchConversations();
-      appState.conversations = list;
-      setSelectedConversation(conversation);
-      loadMessages(conversation.id);
+      const created = await createConversation({ targetUsername: target });
+      const next = await fetchConversations();
+      setConversations(next.items || []);
+      setSelectedConversation(created);
+      await reloadMessages(created.id);
+      setView('app');
     } catch (err) {
       setError(err.message || 'Could not create conversation');
     }
-  };
+  }
 
-  const handleSendMessage = async () => {
+  async function handleSendMessage() {
     if (!draft.trim() || !selectedConversation) return;
-
     try {
       await sendMessage(selectedConversation.id, { content: draft });
-      setDraft('');
-      await loadMessages(selectedConversation.id);
+      setDraft(emptyDraft);
+      await reloadMessages(selectedConversation.id);
+      const refreshed = await fetchConversations();
+      setConversations(refreshed.items || []);
     } catch (err) {
-      setError(err.message || 'Message failed');
+      setError(err.message || 'Failed to send message');
     }
-  };
+  }
 
-  const handleTyping = (isTyping) => {
-    if (!appState.socket || !selectedConversation) return;
-    appState.socket.send(JSON.stringify({ type: 'typing', conversationId: selectedConversation.id, isTyping }));
-  };
-
-  const handleLogout = async () => {
+  async function handleLogout() {
     try {
       await apiFetch('/api/v1/logout', { method: 'POST' });
-      appState.user = null;
-      setStatus('guest');
+      setUser(null);
       setSelectedConversation(null);
+      setConversations([]);
+      setMessages([]);
+      setView('auth');
     } catch (err) {
-      console.error('Logout failed', err);
+      setError(err.message || 'Logout failed');
     }
-  };
+  }
 
-  const startCall = async (kind) => {
-    setCallKind(kind);
-    setCallStatus('ringing');
-    try {
-      const remoteUser = selectedConversation?.participants?.find((p) => p.id !== appState.user.id) || null;
-      if (!remoteUser) throw new Error('No peer is available to call');
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: kind === 'video'
-      });
-      appState.localStream = stream;
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
-      });
-      appState.peerConnection = pc;
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate && appState.socket) {
-          appState.socket.send(JSON.stringify({
-            type: 'signal',
-            targetUserId: remoteUser.id,
-            payload: { type: 'candidate', candidate: event.candidate }
-          }));
-        }
-      };
-
-      pc.ontrack = (event) => {
-        const [remoteStream] = event.streams;
-        appState.remoteStream = remoteStream;
-        setCallStatus('connected');
-      };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      await startCallSignal({
-        targetUserId: remoteUser.id,
-        kind,
-        offer: offer.sdp
-      });
-      setCallStatus('connecting');
-    } catch (err) {
-      setCallStatus('failed');
-      setError(err.message || 'Call setup failed');
-    }
-  };
-
-  const logoutButton = (
-    <button className="primary" onClick={handleLogout}>Log out</button>
-  );
-
-  if (status === 'loading') {
+  if (view === 'loading') {
     return <div className="loading-shell">Loading BondhuChat…</div>;
   }
 
-  if (status === 'guest') {
+  if (view === 'auth') {
     return (
       <div className="auth-shell">
         <div className="auth-card">
-          <h1>BondhuChat</h1>
-          <div className="segmented-control">
-            <button className={authMode === 'login' ? 'active' : ''} onClick={() => setAuthMode('login')}>Login</button>
-            <button className={authMode === 'register' ? 'active' : ''} onClick={() => setAuthMode('register')}>Register</button>
+          <div className="brand-block">
+            <div className="brand-mark">B</div>
+            <div>
+              <h1>BondhuChat</h1>
+              <small>Private messaging, securely built.</small>
+            </div>
           </div>
 
-          <form onSubmit={handleAuthSubmit} className="auth-form">
+          <div className="segmented-control">
+            <button className={authMode === 'login' ? 'active' : ''} type="button" onClick={() => setAuthMode('login')}>Login</button>
+            <button className={authMode === 'register' ? 'active' : ''} type="button" onClick={() => setAuthMode('register')}>Register</button>
+          </div>
+
+          <form className="auth-form" onSubmit={handleAuthSubmit}>
             {authMode === 'register' && (
               <>
                 <label>
@@ -266,8 +171,11 @@ export default function App() {
               <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
             </label>
 
-            {error && <div className="error">{error}</div>}
-            <button className="primary" type="submit">{authMode === 'login' ? 'Sign in' : 'Create account'}</button>
+            {error && <div className="error-box">{error}</div>}
+
+            <button className="primary-button" type="submit">
+              {authMode === 'login' ? 'Sign in' : 'Create account'}
+            </button>
           </form>
         </div>
       </div>
@@ -277,26 +185,31 @@ export default function App() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand-row">
+        <div className="sidebar-header">
           <div>
+            <div className="eyebrow">Private space</div>
             <h2>BondhuChat</h2>
           </div>
-          {logoutButton}
+          <button className="ghost-button" type="button" onClick={handleLogout}>Logout</button>
         </div>
 
-        <button className="primary" onClick={() => handleCreateConversation(window.prompt('Who do you want to chat with?') || '')}>New chat</button>
+        <button className="primary-button" type="button" onClick={handleCreateConversation}>New private chat</button>
 
         <div className="conversation-list">
-          {(appState.conversations || []).map((conversation) => (
+          {conversations.map((conversation) => (
             <button
               key={conversation.id}
+              type="button"
               className={`conversation-item ${selectedConversation?.id === conversation.id ? 'selected' : ''}`}
-              onClick={() => setSelectedConversation(conversation)}
+              onClick={async () => {
+                setSelectedConversation(conversation);
+                await reloadMessages(conversation.id);
+              }}
             >
-              <div className="avatar">{conversation.displayName?.slice(0, 1) || 'U'}</div>
-              <div className="meta">
-                <strong>{conversation.displayName || 'Private chat'}</strong>
-                <small>{conversation.lastMessage || 'No messages yet'}</small>
+              <div className="avatar">{(conversation.display_name || 'U').slice(0, 1).toUpperCase()}</div>
+              <div className="conversation-meta">
+                <strong>{conversation.display_name || 'Private chat'}</strong>
+                <small>{conversation.last_message || 'No messages yet'}</small>
               </div>
             </button>
           ))}
@@ -308,23 +221,28 @@ export default function App() {
           <>
             <header className="chat-header">
               <div>
-                <h3>{selectedConversation.displayName || 'Private chat'}</h3>
-                <small>{typing ? 'Typing…' : 'Online'}</small>
+                <div className="eyebrow">Direct message</div>
+                <h3>{selectedConversation.display_name || 'Private chat'}</h3>
               </div>
-              <div className="call-controls">
-                <button onClick={() => startCall('audio')}>Audio call</button>
-                <button onClick={() => startCall('video')}>Video call</button>
+              <div className="chat-actions">
+                <button type="button">Audio call</button>
+                <button type="button">Video call</button>
               </div>
             </header>
 
             <div className="messages-panel">
-              {(appState.messages || []).map((message) => (
-                <div key={message.id} className={`message ${message.sender === appState.user.id ? 'mine' : ''}`}>
-                  <div className="message-bubble">
-                    <div className="text">{message.content}</div>
+              {messages.length === 0 ? (
+                <div className="empty-state">No messages yet — say hello.</div>
+              ) : (
+                messages.map((message) => (
+                  <div key={message.id} className={`message-row ${message.sender_id === user.id ? 'mine' : ''}`}>
+                    <div className="message-bubble">
+                      <div className="message-content">{message.content}</div>
+                      <div className="message-meta">{message.sender_name || 'You'}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
 
             <div className="composer">
@@ -332,32 +250,32 @@ export default function App() {
                 value={draft}
                 onChange={(e) => {
                   setDraft(e.target.value);
-                  handleTyping(Boolean(e.target.value.trim()));
+                  setStatusText(e.target.value.trim() ? 'Typing…' : '');
                 }}
-                onBlur={() => handleTyping(false)}
                 placeholder="Type a message"
+                aria-label="Message input"
               />
-              <button className="primary" onClick={handleSendMessage}>Send</button>
+              <button className="primary-button" type="button" onClick={handleSendMessage}>Send</button>
             </div>
           </>
         ) : (
-          <div className="empty-state">Start or join a private conversation.</div>
+          <div className="empty-state large">Start a private conversation.</div>
         )}
       </main>
 
       <aside className="profile-panel">
-        <div className="profile-box">
-          <div className="avatar large">{appState.user?.fullName?.slice(0, 1) || 'B'}</div>
-          <h3>{appState.user?.fullName || appState.user?.username}</h3>
-          <small>@{appState.user?.username}</small>
+        <div className="profile-card">
+          <div className="avatar large">{(user?.full_name || user?.username || 'B').slice(0, 1).toUpperCase()}</div>
+          <h3>{user?.full_name || user?.username}</h3>
+          <small>@{user?.username}</small>
         </div>
 
-        <div className="panel-box">
-          <strong>Session status</strong>
-          <p>{callStatus}</p>
+        <div className="info-card">
+          <strong>Presence</strong>
+          <p>{statusText || (selectedParticipant ? 'Online' : 'Ready to chat')}</p>
         </div>
 
-        {error && <div className="error">{error}</div>}
+        {error && <div className="error-box">{error}</div>}
       </aside>
     </div>
   );
